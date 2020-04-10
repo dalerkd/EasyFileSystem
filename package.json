@@ -1,0 +1,12 @@
+{
+  "name": "filesystem",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "dev": "tsc && node ./build/main.js",
+    "debug": "tsc && node --inspect-brk ./build/main.js"
+  },
+  "author": "",
+  "license": "ISC"
+}
