@@ -53,19 +53,27 @@ class DirectoryManager {
      * 将数据序列化成Buffer 
      */
     toBuffer(): Uint8Array {
-        let lenBuffer = Number2Buffer(this.m_itemArray.length)
+        /**
+         * item的数量
+         */
+        let lenBuffer = new ArrayBuffer(4)
+        let dvLen = new DataView(lenBuffer)
+        dvLen.setInt32(0, this.m_itemArray.length)
         let buffer = new Uint8Array(lenBuffer)
+
         this.m_itemArray.forEach((item) => {
-            let typeBuffer = Number2Buffer(item.type)
-            let inodeIndexBuffer = Number2Buffer(item.inodeIndex)
-            let nameLenBuffer = Number2Buffer(item.name.length)
+
+            let arrBuffer = new ArrayBuffer(4 * 3)
+            let dvBuffer = new DataView(arrBuffer);
+            dvBuffer.setInt32(0, item.type)
+            dvBuffer.setInt32(4, item.inodeIndex)
+            dvBuffer.setInt32(8, item.name.length)
+
             let nameBuffer = Buffer.from(item.name)
 
             buffer = Buffer.concat([
                 buffer,
-                new Uint8Array(typeBuffer),
-                new Uint8Array(inodeIndexBuffer),
-                new Uint8Array(nameLenBuffer),
+                new Uint8Array(arrBuffer),
                 new Uint8Array(nameBuffer)
             ])
         })
@@ -78,12 +86,13 @@ class DirectoryManager {
         if (!buffer.length) {
             return
         }
-        for (let offset = 0; offset < buffer.length;) {
-            let type = Buffer2Number(new Uint32Array(buffer.slice(offset, 4)))
+        //前4个字节是item的数量,我们这里没有解析
+        for (let offset = 4; offset < buffer.length;) {
+            let type = Buffer2Number(new Uint32Array(buffer.slice(offset, offset + 4)))
             offset += 4
-            let inodeIndex = Buffer2Number(new Uint32Array(buffer.slice(offset, 4)))
+            let inodeIndex = Buffer2Number(new Uint32Array(buffer.slice(offset, offset + 4)))
             offset += 4
-            let nameLen = Buffer2Number(new Uint32Array(buffer.slice(offset, 4)))
+            let nameLen = Buffer2Number(new Uint32Array(buffer.slice(offset, offset + 4)))
             offset += 4
             let name = buffer.slice(offset, offset + nameLen).toString()
             offset += nameLen
@@ -461,7 +470,7 @@ export default class EasyFileSystem {
             throw (`超范围: 获取数据通过节点索引操作,发现节点索引: ${indexByInode}超过现在索引最大值: ${len - 1}`)
         }
         let node = this.m_nodeArray[indexByInode]
-        return this.m_diskBuffer.slice(node.length, node.length + node.offset)
+        return this.m_diskBuffer.slice(node.offset, node.length + node.offset)
     }
     /**
      * 
