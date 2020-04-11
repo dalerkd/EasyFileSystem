@@ -1,7 +1,7 @@
 import fs from 'fs'
 import ASSERT from 'assert'
 
-const INVALID_INODE_INDEX = -1
+const INVALID_INODE_INDEX = 0xFFFFFFFF
 
 /**
  * 将数字转为32位宽的Buffer
@@ -9,6 +9,9 @@ const INVALID_INODE_INDEX = -1
  */
 function Number2Buffer(num: number): Uint32Array {
     let hex: string = num.toString(16)
+    if (hex.length % 2 != 0) {
+        hex = '0' + hex
+    }
     let matchArray = hex.match(/[\da-f]{2}/gi)!.map(function (h) {
         return parseInt(h, 16)
     })
@@ -114,6 +117,7 @@ class DirectoryManager {
             if (element.type == type) {
                 if (element.name == name) {
                     result = element.inodeIndex
+                    find = true
                     return true
                 }
             }
@@ -136,23 +140,22 @@ class DirectoryManager {
      */
     replaceInode(name: string, type: InodeType, inodeIndex: number) {
         let find: boolean = false
-        let result: number = -1
 
         this.m_itemArray.some((element, key, obj) => {
             if (element.type == type) {
                 if (element.name == name) {
-                    result = element.inodeIndex
-                    if (result != INVALID_INODE_INDEX) {
+                    if (element.inodeIndex != INVALID_INODE_INDEX) {
                         throw ('尝试替换已经初始化的节点')
                     }
                     obj[key].inodeIndex = inodeIndex
+                    find = true
                     return true
                 }
             }
             return false
         });
         if (find) {
-            return result
+            return
         } else {
             throw ('Not Find' + name + 'in Directory')
         }
@@ -206,14 +209,13 @@ export default class EasyFileSystem {
         let directory = new DirectoryManager()
         let item: IF_Directory_Item = {
             type: InodeType.Directory,
-            inodeIndex: 0,
+            inodeIndex: INVALID_INODE_INDEX,
             name: '/'
         }
         directory.itemArray.push(
             item
         )
         this.m_meta_entry = directory
-
     }
     private m_diskBuffer: Uint8Array
     private m_inodeBuffer: Buffer
@@ -255,6 +257,10 @@ export default class EasyFileSystem {
      * {childItemIndex} 要修复项的新索引
      */
     private FixDirInode(fatherInodeIndex: number, childItemFileName: string, childItemType: InodeType, childItemIndex: number) {
+        if (childItemFileName == '/') {
+            this.m_meta_entry.replaceInode(childItemFileName, childItemType, childItemIndex)
+            return
+        }
         if (fatherInodeIndex == INVALID_INODE_INDEX) {
             throw ('正在修正无效的 inode索引对应的数据')
         }
@@ -278,16 +284,26 @@ export default class EasyFileSystem {
      * 必须传入子目录和子文件的名字
      */
     CreateDirectory(path: string, childItem: Array<IF_Directory_Item>) {
-        let obj = this.parsePath(path, InodeType.Directory)
-        let fatherIndex = obj.fatherIndex
-        let dirName = obj.itemName
+        let IsRootPath: boolean = false
+        let fatherIndex: number = INVALID_INODE_INDEX
+        let dirName: string = ""
+        if (path == '/') {
+            dirName = '/'
+            IsRootPath = true
+        } else {
+            let obj = this.parsePath(path, InodeType.Directory)
+            fatherIndex = obj.fatherIndex
+            dirName = obj.itemName
+        }
+
 
         /*开始构建子目录 */
         //我们会自动创建 . 和 .. 两个文件夹 
         let nextInodeIndex = this.m_nodeArray.length
         let arrDirItem: Array<IF_Directory_Item> = []
         arrDirItem.push({ type: InodeType.Directory, inodeIndex: nextInodeIndex, name: '.' })
-        arrDirItem.push({ type: InodeType.Directory, inodeIndex: fatherIndex, name: '..' })
+        if (!IsRootPath)
+            arrDirItem.push({ type: InodeType.Directory, inodeIndex: fatherIndex, name: '..' })
 
         childItem.forEach((item) => {
             item.inodeIndex = INVALID_INODE_INDEX
@@ -465,7 +481,11 @@ export default class EasyFileSystem {
         cl('欢迎使用文件打包系统,它可以将目录打包成一个独立的文件,并提供访问接口')
         cl('下面是测试程序')
         cl('开始测试 打包相关功能')
-        ASSERT(efs.DirDirectory('/').itemArray.length == 1, '根目录下原始文件夹数量错误')
+        let arr1: Array<IF_Directory_Item> = [
+            { type: InodeType.Directory, inodeIndex: INVALID_INODE_INDEX, name: 'd' }
+        ]
+        efs.CreateDirectory('/', arr1)
+        ASSERT(efs.DirDirectory('/').itemArray.length == 2, '根目录下原始文件夹数量错误')
         ASSERT(efs.hasExistDictory('/') == true, '不存在预期的 根文件夹')
         ASSERT(efs.hasExistDictory('/./') == true, '不存在预期的.文件夹在根目录下')
         ASSERT(efs.hasExistDictory('/./d/') == false, '对不存在的d 没有给出不存在的反馈')
