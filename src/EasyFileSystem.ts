@@ -1,7 +1,7 @@
 import fs from 'fs'
 import ASSERT from 'assert'
 
-const INVALID_INODE_INDEX = 0xFFFFFFFF
+const INVALID_INODE_INDEX = -1
 
 /**
  * 将数字转为32位宽的Buffer
@@ -17,6 +17,49 @@ function Number2Buffer(num: number): Uint32Array {
     })
     let typedArray = new Uint32Array(matchArray)
     return typedArray
+}
+
+// http://www.onicos.com/staff/iz/amuse/javascript/expert/utf.txt
+
+/* utf.js - UTF-8 <=> UTF-16 convertion
+ *
+ * Copyright (C) 1999 Masanao Izumo <iz@onicos.co.jp>
+ * Version: 1.0
+ * LastModified: Dec 25 1999
+ * This library is free.  You can redistribute it and/or modify it.
+ */
+
+function Utf8ArrayToStr(array: Uint8Array): string {
+    var out, i, len, c;
+    var char2, char3;
+
+    out = "";
+    len = array.length;
+    i = 0;
+    while (i < len) {
+        c = array[i++];
+        switch (c >> 4) {
+            case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7:
+                // 0xxxxxxx
+                out += String.fromCharCode(c);
+                break;
+            case 12: case 13:
+                // 110x xxxx   10xx xxxx
+                char2 = array[i++];
+                out += String.fromCharCode(((c & 0x1F) << 6) | (char2 & 0x3F));
+                break;
+            case 14:
+                // 1110 xxxx  10xx xxxx  10xx xxxx
+                char2 = array[i++];
+                char3 = array[i++];
+                out += String.fromCharCode(((c & 0x0F) << 12) |
+                    ((char2 & 0x3F) << 6) |
+                    ((char3 & 0x3F) << 0));
+                break;
+        }
+    }
+
+    return out;
 }
 
 function Buffer2Number(buffer: Uint32Array): number {
@@ -67,10 +110,8 @@ class DirectoryManager {
             let dvBuffer = new DataView(arrBuffer);
             dvBuffer.setInt32(0, item.type)
             dvBuffer.setInt32(4, item.inodeIndex)
-            dvBuffer.setInt32(8, item.name.length)
-
             let nameBuffer = Buffer.from(item.name)
-
+            dvBuffer.setInt32(8, nameBuffer.length)//有可能是中文等,不能直接item.name.length
             buffer = Buffer.concat([
                 buffer,
                 new Uint8Array(arrBuffer),
@@ -82,30 +123,32 @@ class DirectoryManager {
     /**
      *  从Buffer中构造出一组目录项
      */
-    LoadFromBuffer(buffer: Uint8Array) {
-        if (!buffer.length) {
+    LoadFromBuffer(bufferUint8: Uint8Array) {
+        if (!bufferUint8.length) {
             return
         }
         //前4个字节是item的数量,我们这里没有解析
-        for (let offset = 4; offset < buffer.length;) {
-            let type = Buffer2Number(new Uint32Array(buffer.slice(offset, offset + 4)))
-            offset += 4
-            let inodeIndex = Buffer2Number(new Uint32Array(buffer.slice(offset, offset + 4)))
-            offset += 4
-            let nameLen = Buffer2Number(new Uint32Array(buffer.slice(offset, offset + 4)))
-            offset += 4
-            let name = buffer.slice(offset, offset + nameLen).toString()
-            offset += nameLen
-            if (offset > buffer.length) {
-                throw (`LoadFromBuffer:目录项错误的转换,在offset:${offset}的时候,发现buffer.length:${buffer.length},这通常是由于存储的格式和解读的格式长度不匹配`)
-            }
+        // 
+        let buffer: ArrayBuffer = bufferUint8.buffer.slice(bufferUint8.byteOffset, bufferUint8.byteOffset + bufferUint8.byteLength)
+        let dvBuffer = new DataView(buffer)
+        let itemNumber = dvBuffer.getInt32(0)
+        let offset = 4;
+        for (let n = 0; n < itemNumber; n++) {
+            const type = dvBuffer.getInt32(offset)
+            offset += 4;
+            const inodeIndex = dvBuffer.getInt32(offset)
+            offset += 4;
+            const nameLen = dvBuffer.getInt32(offset)
+            offset += 4;
+            const u8aStr: Uint8Array = new Uint8Array(buffer.slice(offset, offset + nameLen))
+            let name: string = Utf8ArrayToStr(u8aStr)
+            offset += nameLen;
             this.m_itemArray.push({
                 type: type,
                 inodeIndex: inodeIndex,
                 name: name
             })
         }
-
     }
     /*
     大小不能修改
@@ -121,7 +164,7 @@ class DirectoryManager {
      */
     findInode(name: string, type: InodeType): number {
         let find: boolean = false
-        let result: number = -1
+        let result: number = INVALID_INODE_INDEX
         this.m_itemArray.some(element => {
             if (element.type == type) {
                 if (element.name == name) {
@@ -195,14 +238,14 @@ export default class EasyFileSystem {
     constructor(diskFilePath: string, inodeFilePath: string) {
         let buffer: Buffer
         if (!fs.existsSync(diskFilePath)) {
-            buffer = new Buffer(0)
+            buffer = Buffer.from('')
         } else {
             buffer = fs.readFileSync(diskFilePath)
         }
 
         this.m_diskBuffer = new Uint8Array(buffer)
         if (!fs.existsSync(inodeFilePath)) {
-            this.m_inodeBuffer = new Buffer(0)
+            this.m_inodeBuffer = Buffer.from('')
         }
         else {
             this.m_inodeBuffer = fs.readFileSync(inodeFilePath)
@@ -277,8 +320,6 @@ export default class EasyFileSystem {
             throw (`正在修正的inode索引: ${fatherInodeIndex} 超出了inode数组范围: ${this.m_nodeArray.length}`)
         }
         let node = this.m_nodeArray[fatherInodeIndex]
-        node.length
-        node.offset
         let buffer = this.m_diskBuffer.slice(node.offset, node.offset + node.length)
         let dir = new DirectoryManager()
         dir.LoadFromBuffer(buffer)
@@ -292,7 +333,7 @@ export default class EasyFileSystem {
      * 因为是RAW系统,必须分别预留是当前层的子项数量
      * 必须传入子目录和子文件的名字
      */
-    CreateDirectory(path: string, childItem: Array<IF_Directory_Item>) {
+    private CreateDirectory(path: string, childItem: Array<IF_Directory_Item>) {
         let IsRootPath: boolean = false
         let fatherIndex: number = INVALID_INODE_INDEX
         let dirName: string = ""
@@ -304,7 +345,6 @@ export default class EasyFileSystem {
             fatherIndex = obj.fatherIndex
             dirName = obj.itemName
         }
-
 
         /*开始构建子目录 */
         //我们会自动创建 . 和 .. 两个文件夹 
@@ -320,8 +360,8 @@ export default class EasyFileSystem {
                 if (item.name == value.name) {
                     throw ('希望占用的子目录名字:"' + item.name + '" 已经存在')
                 }
-                arrDirItem.push(item)
             })
+            arrDirItem.push(item)
         })
         /**
          * - 将自己的数据写入Disk Buffer中.并在inodeArray中记录
@@ -336,7 +376,7 @@ export default class EasyFileSystem {
     /**
      * 创建文件同时写文件
      */
-    CreateFile(path: string, buffer: Uint8Array) {
+    private CreateFile(path: string, buffer: Uint8Array) {
         let obj = this.parsePath(path, InodeType.File)
         let fatherIndex = obj.fatherIndex
         let fileName = obj.itemName
@@ -371,16 +411,21 @@ export default class EasyFileSystem {
         if (!fatherDirPath) {
             fatherDirPath = '/'
         }
+        if (!fatherDirPath.endsWith('/')) {
+            fatherDirPath += '/'
+        }
         let fatherDirObj = this.DirDirectory(fatherDirPath)
         //要创建的内容必须在父目录已经预留名字
+        let arr_dir
         try {
-            let arr_dir = fatherDirObj.findInode(name, InodeType.File)
-            if (arr_dir != INVALID_INODE_INDEX) {
-                throw (`要创建的${NAME}${name}已经在父目录中存在并分配了inode`)
-            }
+            arr_dir = fatherDirObj.findInode(name, type)
         } catch{
             throw (`要创建的${NAME}${name}未发现在父目录中预留分配 目录项`)
         }
+        if (arr_dir != INVALID_INODE_INDEX) {
+            throw (`要创建的${NAME}${name}已经在父目录中存在并分配了inode`)
+        }
+
 
         let fatherIndex = fatherDirObj.findInode('.', InodeType.Directory)
         return {
@@ -453,6 +498,7 @@ export default class EasyFileSystem {
         let pathArr = path.split('/')
         let fileName: any = pathArr.pop()
         let dirPath = pathArr.join('/')
+        if (!dirPath.endsWith('/')) dirPath += '/'
         let dirInfo: DirectoryManager = this.DirDirectory(dirPath)
         let inodeIndex = dirInfo.findInode(fileName, InodeType.File)
         return this.GetDataByInode(inodeIndex)
@@ -476,7 +522,7 @@ export default class EasyFileSystem {
      * 
      * 会返回booleam 是否存在目录
      */
-    hasExistDictory(path: string): boolean {
+    hasExistDirectory(path: string): boolean {
         try {
             this.DirDirectory(path)
             return true
@@ -484,58 +530,72 @@ export default class EasyFileSystem {
             return false
         }
     }
+    PackDirctory(dirPath: string) {
+        throw ('TODO')
+    }
     static TestMySelf() {
         let efs = new EasyFileSystem('./inode', './HarkDisk')
         const cl = console.log
-        cl('欢迎使用文件打包系统,它可以将目录打包成一个独立的文件,并提供访问接口')
-        cl('下面是测试程序')
-        cl('开始测试 打包相关功能')
+        //cl('欢迎使用文件打包系统,它可以将目录打包成一个独立的文件,并提供访问接口')
+        cl('## 开始EasyFileSystem系统测试:')
         let arr1: Array<IF_Directory_Item> = [
             { type: InodeType.Directory, inodeIndex: INVALID_INODE_INDEX, name: 'd' }
         ]
         efs.CreateDirectory('/', arr1)
         ASSERT(efs.DirDirectory('/').itemArray.length == 2, '根目录下原始文件夹数量错误')
-        ASSERT(efs.hasExistDictory('/') == true, '不存在预期的 根文件夹')
-        ASSERT(efs.hasExistDictory('/./') == true, '不存在预期的.文件夹在根目录下')
-        ASSERT(efs.hasExistDictory('/./d/') == false, '对不存在的d 没有给出不存在的反馈')
-        let arr5: Array<IF_Directory_Item> = [
-            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: '1.txt' },
-            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: '2.txt' },
-            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: '3.txt' },
-            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: '4.txt' },
+        ASSERT(efs.hasExistDirectory('/') == true, '不存在预期的 根文件夹')
+        ASSERT(efs.hasExistDirectory('/./') == true, '不存在预期的.文件夹在根目录下')
+        ASSERT(efs.hasExistDirectory('/./d/') == false, '对不存在的d 没有给出不存在的反馈')
+        cl('测试 文件夹存在性 相关测试 √')
+        let arr7: Array<IF_Directory_Item> = [
+
+            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: 'f2.txt' },
+            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: 'f3.txt' },
+            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: 'f4.txt' },
+            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: 'f5.txt' },
+            { type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: 'f六号文档.txt' },
             { type: InodeType.Directory, inodeIndex: INVALID_INODE_INDEX, name: 'd1' },
+            { type: InodeType.Directory, inodeIndex: INVALID_INODE_INDEX, name: 'd二文件夹' },
         ]
-        efs.CreateDirectory('/./d/', arr5)//拥有5条内容的文件夹
+        efs.CreateDirectory('/./d/', arr7)//拥有7条内容的文件夹
         efs.CreateDirectory('/./d/d1/', [])//空文件夹
+        efs.CreateDirectory('/./d/d二文件夹/', [])
+        efs.CreateFile('/./d/f六号文档.txt', Buffer.from('1234\n中5678'))
+        ASSERT(Utf8ArrayToStr(efs.ReadFile('/./d/f六号文档.txt')) == '1234\n中5678')
+        cl('中文文件名及中文读写文件测试    √')
+        ASSERT(efs.DirDirectory('/./d/d二文件夹/').itemArray.length == 2)
         try {
             efs.CreateDirectory('/d/d1/', [])
             ASSERT(false, '禁止重复创建文件夹:失效')
         } catch{
-            ;
+            cl('禁止重复创建文件夹  √');
         }
-        efs.CreateFile('/./d/f2.txt', new Buffer("1234"))
-        efs.CreateFile('/./d/f3.txt', new Buffer("1234"))
-        efs.CreateFile('/./d/f4.txt', new Buffer("1234"))
-        efs.CreateFile('/./d/f5.txt', new Buffer("1234"))
+        efs.DirDirectory('/d/')
+        efs.CreateFile('/./d/f2.txt', Buffer.from("1234"))
+        efs.CreateFile('/./d/f3.txt', Buffer.from("1234"))
+        efs.CreateFile('/./d/f4.txt', Buffer.from("1234"))
+        efs.CreateFile('/./d/f5.txt', Buffer.from("1234"))
         try {
-            efs.CreateFile('/./d/f5.txt', new Buffer("1234"))
+            efs.CreateFile('/./d/f5.txt', Buffer.from("1234"))
             ASSERT(false, '禁止重复创建文件:失效')
         } catch{
-            ;
+            cl('禁止重复创建文件   √');
         }
         try {
-            efs.CreateFile('/./d/f6.txt', new Buffer("1234"))
-            ASSERT(false, '禁止创建超出约定数量的文件|文件夹')
+            efs.CreateFile('/./d/f6.txt', Buffer.from("1234"))
+            ASSERT(false, '禁止创建超出约定名字的文件')
         } catch{
-            ;
+            cl('禁止创建超出约定名字的文件  √');
         }
         try {
             efs.DirDirectory('/b')
             ASSERT(false)
         } catch{
-            ;
+            cl('文件夹名字规范性检查    √');
         }
-        ASSERT(efs.DirDirectory('/d/').itemArray.length == (2/*. 和 .. */ + 5))
+        ASSERT(efs.DirDirectory('/d/').itemArray.length == (2/*. 和 .. */ + 7))
+        cl('批量创建文件及文件夹数量检查    √')
+        cl('全部测试  通过  √')
     }
 
 }
