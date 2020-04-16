@@ -530,8 +530,71 @@ export default class EasyFileSystem {
             return false
         }
     }
-    PackDirctory(dirPath: string) {
-        throw ('TODO')
+
+    PackDirctory(dirPath: string, flatPath: string = '/') {
+        //根据文件路径读取文件，返回文件列表
+        let path = require('path')
+        fs.readdir(dirPath, (err, files) => {
+            if (err) {
+                console.warn(err)
+            } else {
+                /**
+                 * 进行两步操作:
+                 * 1. 对Item列表插入 TODO
+                 * 2. 对 文件 和 目录采取不同的行为 TODO
+                 */
+                /**
+                 * 通过组装item 来 先创建目录及预留子目录项
+                 */
+                let arrItem: Array<IF_Directory_Item> = []
+                files.forEach((filename) => {
+                    //获取当前文件的绝对路径
+                    var filedir = path.join(dirPath, filename);
+                    //根据文件路径获取文件信息，返回一个fs.Stats对象
+                    fs.stat(filedir, (eror, stats) => {
+                        if (eror) {
+                            console.warn('获取文件stats失败');
+                        } else {
+                            var isFile = stats.isFile();//是文件
+                            var isDir = stats.isDirectory();//是文件夹
+                            if (isFile) {
+                                arrItem.push({
+                                    type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: filename
+                                })
+                            } else if (isDir) {
+                                arrItem.push({
+                                    type: InodeType.Directory, inodeIndex: INVALID_INODE_INDEX, name: filename
+                                })
+                            }
+                        }
+                    })
+                });
+                this.CreateDirectory(flatPath, arrItem)
+
+                /**
+                 * 创建子文件
+                 */
+                files.forEach((filename) => {
+                    //获取当前文件的绝对路径
+                    var filedir = path.join(dirPath, filename);
+                    //根据文件路径获取文件信息，返回一个fs.Stats对象
+                    fs.stat(filedir, (eror, stats) => {
+                        if (eror) {
+                            console.warn('获取文件stats失败');
+                        } else {
+                            var isFile = stats.isFile();//是文件
+                            var isDir = stats.isDirectory();//是文件夹
+                            if (isFile) {
+                                this.CreateFile(flatPath + filename, fs.readFileSync(filedir))
+                            } else if (isDir) {
+                                this.PackDirctory(filedir, flatPath + filename + '/');//递归，如果是文件夹，就继续遍历该文件夹下面的文件
+                            }
+                        }
+                    })
+                });
+            }
+        });
+
     }
     static TestMySelf() {
         let efs = new EasyFileSystem('./inode', './HarkDisk')
