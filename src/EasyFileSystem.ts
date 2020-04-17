@@ -88,6 +88,16 @@ interface IF_Directory_Item {
     inodeIndex: number
     name: string
 }
+
+class InodeManager {
+    static toBuffer() {
+
+    }
+    static fromBuffer() {
+
+    }
+}
+
 class DirectoryManager {
     constructor(itemArray: Array<IF_Directory_Item> = []) {
         this.m_itemArray = itemArray
@@ -237,6 +247,8 @@ class DirectoryManager {
 export default class EasyFileSystem {
     constructor(diskFilePath: string, inodeFilePath: string) {
         let buffer: Buffer
+        this.m_diskFilePath = diskFilePath
+        this.m_inodeFilePath = inodeFilePath
         if (!fs.existsSync(diskFilePath)) {
             buffer = Buffer.from('')
         } else {
@@ -251,7 +263,7 @@ export default class EasyFileSystem {
             this.m_inodeBuffer = fs.readFileSync(inodeFilePath)
         }
 
-        this.m_nodeArray = []
+        this.m_nodeArray = InodeManager.fromBuffer(this.m_inodeBuffer)
 
         //仅仅为了不报TS提醒... ...
         this.m_meta_entry = new DirectoryManager()
@@ -274,7 +286,8 @@ export default class EasyFileSystem {
     private m_nodeArray: Array<IF_Inode>
     private m_meta_entry: DirectoryManager
 
-
+    private m_diskFilePath: string
+    private m_inodeFilePath: string
 
     /**
      * 将数据压入 Disk  和 Inode
@@ -530,7 +543,18 @@ export default class EasyFileSystem {
             return false
         }
     }
-    async PackDirctory(dirPath: string, flatPath: string = '/') {
+    private Append2Disk() {
+        //inode序列化成Buffer
+        //存储结果到硬盘中
+        this.m_inodeBuffer = InodeManager.toBuffer(this.m_nodeArray)
+        fs.writeFileSync(this.m_inodeFilePath, this.m_inodeBuffer)
+        fs.writeFileSync(this.m_diskFilePath, this.m_diskBuffer)
+    }
+    async PackDirctory(dirPath: string) {
+        await this.executePackDirctory(dirPath)
+        this.Append2Disk()
+    }
+    private async executePackDirctory(dirPath: string, flatPath: string = '/') {
         //根据文件路径读取文件，返回文件列表
         let path = require('path')
         const debug = true
@@ -566,8 +590,6 @@ export default class EasyFileSystem {
                         type: InodeType.Directory, inodeIndex: INVALID_INODE_INDEX, name: fileName
                     })
                 }
-
-
             });
             if (debug) cl(`正在创建 文件夹:${flatPath}`)
             this.CreateDirectory(flatPath, arrItem)
@@ -586,7 +608,7 @@ export default class EasyFileSystem {
                     if (debug) cl(`正在创建 文件:${flatPath + fileName}`)
                     this.CreateFile(flatPath + fileName, fs.readFileSync(filedir))
                 } else if (isDir) {
-                    await this.PackDirctory(filedir, flatPath + fileName + '/');//递归，如果是文件夹，就继续遍历该文件夹下面的文件
+                    await this.executePackDirctory(filedir, flatPath + fileName + '/');//递归，如果是文件夹，就继续遍历该文件夹下面的文件
                 }
 
             };
