@@ -30,8 +30,8 @@ function Number2Buffer(num: number): Uint32Array {
  */
 
 function Utf8ArrayToStr(array: Uint8Array): string {
-    var out, i, len, c;
-    var char2, char3;
+    let out, i, len, c;
+    let char2, char3;
 
     out = "";
     len = array.length;
@@ -530,71 +530,70 @@ export default class EasyFileSystem {
             return false
         }
     }
-
-    PackDirctory(dirPath: string, flatPath: string = '/') {
+    async PackDirctory(dirPath: string, flatPath: string = '/') {
         //根据文件路径读取文件，返回文件列表
         let path = require('path')
-        fs.readdir(dirPath, (err, files) => {
-            if (err) {
-                console.warn(err)
-            } else {
-                /**
-                 * 进行两步操作:
-                 * 1. 对Item列表插入 TODO
-                 * 2. 对 文件 和 目录采取不同的行为 TODO
-                 */
-                /**
-                 * 通过组装item 来 先创建目录及预留子目录项
-                 */
-                let arrItem: Array<IF_Directory_Item> = []
-                files.forEach((filename) => {
-                    //获取当前文件的绝对路径
-                    var filedir = path.join(dirPath, filename);
-                    //根据文件路径获取文件信息，返回一个fs.Stats对象
-                    fs.stat(filedir, (eror, stats) => {
-                        if (eror) {
-                            console.warn('获取文件stats失败');
-                        } else {
-                            var isFile = stats.isFile();//是文件
-                            var isDir = stats.isDirectory();//是文件夹
-                            if (isFile) {
-                                arrItem.push({
-                                    type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: filename
-                                })
-                            } else if (isDir) {
-                                arrItem.push({
-                                    type: InodeType.Directory, inodeIndex: INVALID_INODE_INDEX, name: filename
-                                })
-                            }
-                        }
-                    })
-                });
-                this.CreateDirectory(flatPath, arrItem)
+        const debug = true
+        const cl = console.log
+        return new Promise(async (resolve, reject) => {
+            let files = fs.readdirSync(dirPath)
+            /**
+             * 进行两步操作:
+             * 1. 对Item列表插入 TODO
+             * 2. 对 文件 和 目录采取不同的行为 TODO
+             */
+            /**
+             * 通过组装item 来 先创建目录及预留子目录项
+             */
+            let arrItem: Array<IF_Directory_Item> = []
+            if (debug) cl(`Start Explorer:${dirPath}`)
+            files.forEach((fileName) => {
+                //获取当前文件的绝对路径
+                let filedir = path.join(dirPath, fileName);
+                //根据文件路径获取文件信息，返回一个fs.Stats对象
+                let stats = fs.statSync(filedir)
 
-                /**
-                 * 创建子文件
-                 */
-                files.forEach((filename) => {
-                    //获取当前文件的绝对路径
-                    var filedir = path.join(dirPath, filename);
-                    //根据文件路径获取文件信息，返回一个fs.Stats对象
-                    fs.stat(filedir, (eror, stats) => {
-                        if (eror) {
-                            console.warn('获取文件stats失败');
-                        } else {
-                            var isFile = stats.isFile();//是文件
-                            var isDir = stats.isDirectory();//是文件夹
-                            if (isFile) {
-                                this.CreateFile(flatPath + filename, fs.readFileSync(filedir))
-                            } else if (isDir) {
-                                this.PackDirctory(filedir, flatPath + filename + '/');//递归，如果是文件夹，就继续遍历该文件夹下面的文件
-                            }
-                        }
+                let isFile = stats.isFile();//是文件
+                let isDir = stats.isDirectory();//是文件夹
+                if (isFile) {
+                    if (debug) cl(`预添加 文件项:${fileName}`)
+                    arrItem.push({
+                        type: InodeType.File, inodeIndex: INVALID_INODE_INDEX, name: fileName
                     })
-                });
-            }
-        });
+                } else if (isDir) {
+                    if (debug) cl(`预添加 目录项:${fileName}`)
+                    arrItem.push({
+                        type: InodeType.Directory, inodeIndex: INVALID_INODE_INDEX, name: fileName
+                    })
+                }
 
+
+            });
+            if (debug) cl(`正在创建 文件夹:${flatPath}`)
+            this.CreateDirectory(flatPath, arrItem)
+
+            /**
+             * 创建子文件
+             */
+            for (let fileName of files) {
+                //获取当前文件的绝对路径
+                let filedir = path.join(dirPath, fileName);
+                //根据文件路径获取文件信息，返回一个fs.Stats对象
+                let stats = fs.statSync(filedir)
+                let isFile = stats.isFile();//是文件
+                let isDir = stats.isDirectory();//是文件夹
+                if (isFile) {
+                    if (debug) cl(`正在创建 文件:${flatPath + fileName}`)
+                    this.CreateFile(flatPath + fileName, fs.readFileSync(filedir))
+                } else if (isDir) {
+                    await this.PackDirctory(filedir, flatPath + fileName + '/');//递归，如果是文件夹，就继续遍历该文件夹下面的文件
+                }
+
+            };
+            resolve()
+
+
+        })
     }
     static TestMySelf() {
         let efs = new EasyFileSystem('./inode', './HarkDisk')

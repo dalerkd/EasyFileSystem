@@ -1,5 +1,9 @@
 import EasyFileSystem from "./EasyFileSystem";
 
-EasyFileSystem.TestMySelf()
+async function TestPackDir() {
+    new EasyFileSystem('disk.bin', 'inode.bin').PackDirctory('F:/Desktop/截图/MyCut/')
+    console.log('数据成功装入文件中')
+}
 
-new EasyFileSystem('disk.bin', 'inode.bin').PackDirctory('./')
+EasyFileSystem.TestMySelf()
+TestPackDir()
