@@ -15,14 +15,24 @@ function ExplorerFileSystem(fileSystemName: string) {
     cl('遍历完毕')
 }
 
+
+function Export(fileSystemName: string, export_root_dir: string) {
+    let cl = console.log
+    const obj = new EasyFileSystem(`${fileSystemName}_disk.bin`, `${fileSystemName}_inode.bin`)
+    obj.Export(export_root_dir)
+    cl('导出完毕')
+}
+
+
 async function Test() {
-    let fileSystemName = '当前'
+    let fileSystemName = '../当前'
     try {
-        await PackDir('./', fileSystemName);
+        await PackDir('../', fileSystemName);
     } catch (e) {
         console.log(e)
     }
     ExplorerFileSystem(fileSystemName)
+    Export(fileSystemName, '../../fs_output/')
 }
 
 EasyFileSystem.TestMySelf();

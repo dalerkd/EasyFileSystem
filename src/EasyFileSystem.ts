@@ -705,6 +705,26 @@ export default class EasyFileSystem {
             }
         }
     }
+    Export(outputDir: string) {
+        if (outputDir.endsWith('/')) {
+            outputDir = outputDir.substr(0, outputDir.length - 1);
+        }
+        let cl = console.log
+        const cbDir = (virtualPath: string, name: string) => {
+            cl(`文件夹: ${virtualPath + name}`)
+            let dir = outputDir + virtualPath + name
+            if (name != '.' && name != '..')
+                fs.mkdirSync(dir, { recursive: true })
+            return false
+        }
+        const cbFile = (virtualPath: string, name: string, buffer: Buffer) => {
+            cl(`路径: ${virtualPath} 文件:   ${name} :长度: ${buffer.length}`)
+            let filePath = outputDir + virtualPath + name
+            fs.writeFileSync(filePath, buffer)
+            return false
+        }
+        this.executeExplorer(cbDir, cbFile)
+    }
     static TestMySelf() {
         let efs = new EasyFileSystem("./inode", "./HarkDisk");
         const cl = console.log;
